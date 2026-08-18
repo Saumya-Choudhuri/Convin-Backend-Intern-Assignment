@@ -5,6 +5,18 @@ stores them, and updates per-account call statistics.
 
 It is in production. It is misbehaving.
 
+## Simple explanation of the fix
+
+This service had three real production issues.
+
+First, webhook retries were not safely deduplicated. The code checked whether an event existed and then inserted it, which created a race condition when the same webhook arrived twice at the same time. I fixed that by storing the event ID as a unique value in Postgres and using `INSERT ... ON CONFLICT DO NOTHING` so the same delivery is only processed once.
+
+Second, the recording-processing job was tied to the HTTP request context. Once the request returned, the context was canceled and the background work disappeared. I fixed that by running the recording task with its own background context so it can finish reliably.
+
+Third, the in-memory stats cache was being updated without locking, so concurrent requests could race and produce wrong totals. I added proper locking around cache updates.
+
+I also added a regression test that sends duplicate webhook deliveries at the same time to confirm the fix works under retry pressure.
+
 ## The incident
 
 Last week operations filed this:
